@@ -1,16 +1,12 @@
 import { randomUUID } from "crypto";
 
 import { chunkDocument } from "./chunk";
+import { getDb } from "./db";
+import { embedTexts, getEmbeddingModelId } from "./embeddings/hf";
+import { getHfToken, isEmbeddingsDisabled } from "./env";
 import { firstSentence } from "./text";
 import { buildRetriever } from "./tfidf";
-
-export type IndexedChunk = {
-  id: string;
-  documentId: string;
-  documentName: string;
-  text: string;
-  order: number;
-};
+import { dotProduct } from "./vector";
 
 export type IndexedDocument = {
   id: string;
@@ -19,101 +15,208 @@ export type IndexedDocument = {
   createdAt: string;
 };
 
-type InternalState = {
-  documents: Map<string, { name: string; createdAt: string; chunks: IndexedChunk[] }>;
+export type AnswerResult = {
+  status: "ok" | "no_evidence";
+  answer?: string;
+  quote?: string;
+  source?: string;
+  score?: number;
+  retrieval?: "embedding" | "tfidf";
 };
 
-const globalStore: InternalState = {
-  documents: new Map(),
+type ChunkRow = {
+  text: string;
+  document_name: string;
+  embedding: number[] | null;
 };
 
-function rebuildChunksArray(): IndexedChunk[] {
-  const all: IndexedChunk[] = [];
-  for (const doc of globalStore.documents.values()) {
-    all.push(...doc.chunks);
-  }
-  return all;
+const MIN_TFIDF_SCORE = 0.06;
+const MIN_COSINE_SCORE = 0.28;
+
+function loadChunkRows(): ChunkRow[] {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT text, document_name, embedding_json AS emb FROM chunks
+       ORDER BY document_id, chunk_order`,
+    )
+    .all() as { text: string; document_name: string; emb: string | null }[];
+
+  return rows.map((r) => ({
+    text: r.text,
+    document_name: r.document_name,
+    embedding: r.emb ? (JSON.parse(r.emb) as number[]) : null,
+  }));
 }
 
 export function listDocuments(): IndexedDocument[] {
-  const out: IndexedDocument[] = [];
-  for (const [id, doc] of globalStore.documents) {
-    out.push({
-      id,
-      name: doc.name,
-      chunkCount: doc.chunks.length,
-      createdAt: doc.createdAt,
-    });
-  }
-  return out;
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT d.id, d.name, d.created_at AS createdAt,
+              (SELECT COUNT(*) FROM chunks c WHERE c.document_id = d.id) AS chunkCount
+       FROM documents d
+       ORDER BY d.created_at DESC`,
+    )
+    .all() as {
+      id: string;
+      name: string;
+      createdAt: string;
+      chunkCount: number;
+    }[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    chunkCount: Number(r.chunkCount),
+    createdAt: r.createdAt,
+  }));
 }
 
-export function addDocument(name: string, content: string): { document: IndexedDocument; chunks: IndexedChunk[] } {
+export async function addDocument(
+  name: string,
+  content: string,
+): Promise<{ document: IndexedDocument }> {
   const trimmedName = name.trim() || "document.md";
   const trimmedContent = content.trim();
   if (!trimmedContent) {
     throw new Error("Document content is empty.");
   }
 
+  const parts = chunkDocument(trimmedContent);
+  if (parts.length === 0) {
+    throw new Error("No indexable passages after chunking.");
+  }
+
   const documentId = randomUUID();
   const createdAt = new Date().toISOString();
-  const parts = chunkDocument(trimmedContent);
+  const db = getDb();
 
-  const chunks: IndexedChunk[] = parts.map((text, order) => ({
-    id: randomUUID(),
-    documentId,
-    documentName: trimmedName,
-    text,
-    order,
-  }));
+  const token = getHfToken();
+  let embeddings: (number[] | null)[] = parts.map(() => null);
 
-  globalStore.documents.set(documentId, {
-    name: trimmedName,
-    createdAt,
-    chunks,
+  if (token && !isEmbeddingsDisabled()) {
+    try {
+      const vectors = await embedTexts(parts, token);
+      embeddings = vectors.map((v) => v);
+    } catch {
+      embeddings = parts.map(() => null);
+    }
+  }
+
+  const insertDoc = db.prepare(
+    `INSERT INTO documents (id, name, created_at) VALUES (?, ?, ?)`,
+  );
+  const insertChunk = db.prepare(
+    `INSERT INTO chunks (id, document_id, document_name, chunk_order, text, embedding_json)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+
+  const run = db.transaction(() => {
+    insertDoc.run(documentId, trimmedName, createdAt);
+    parts.forEach((text, order) => {
+      const emb = embeddings[order];
+      insertChunk.run(
+        randomUUID(),
+        documentId,
+        trimmedName,
+        order,
+        text,
+        emb ? JSON.stringify(emb) : null,
+      );
+    });
   });
+  run();
 
   return {
     document: {
       id: documentId,
       name: trimmedName,
-      chunkCount: chunks.length,
+      chunkCount: parts.length,
       createdAt,
     },
-    chunks,
   };
 }
 
 export function clearDocuments(): void {
-  globalStore.documents.clear();
+  const db = getDb();
+  db.prepare(`DELETE FROM documents`).run();
 }
 
-export function answerQuestion(question: string, minScore = 0.06): {
-  status: "ok" | "no_evidence";
-  answer?: string;
-  quote?: string;
-  source?: string;
-  score?: number;
-} {
-  const chunks = rebuildChunksArray();
-  if (chunks.length === 0) {
+export async function answerQuestion(question: string): Promise<AnswerResult> {
+  const rows = loadChunkRows();
+  if (rows.length === 0) {
     return { status: "no_evidence" };
   }
 
-  const texts = chunks.map((c) => c.text);
+  const token = getHfToken();
+  const hasEmbeddings = rows.some((r) => r.embedding !== null);
+  const canTryEmbedding =
+    Boolean(token) && !isEmbeddingsDisabled() && hasEmbeddings;
+
+  if (canTryEmbedding && token) {
+    try {
+      const queryVectors = await embedTexts([question], token);
+      const q = queryVectors[0];
+      if (q) {
+        let bestIdx = -1;
+        let bestScore = -1;
+        rows.forEach((row, i) => {
+          if (!row.embedding || row.embedding.length !== q.length) {
+            return;
+          }
+          const s = dotProduct(q, row.embedding);
+          if (s > bestScore) {
+            bestScore = s;
+            bestIdx = i;
+          }
+        });
+        if (bestIdx >= 0 && bestScore >= MIN_COSINE_SCORE) {
+          const best = rows[bestIdx];
+          return {
+            status: "ok",
+            answer: firstSentence(best.text),
+            quote: best.text.trim(),
+            source: best.document_name,
+            score: bestScore,
+            retrieval: "embedding",
+          };
+        }
+      }
+    } catch {
+      // Fall through to TF–IDF
+    }
+  }
+
+  const texts = rows.map((r) => r.text);
   const retrieve = buildRetriever(texts);
   const { index, score } = retrieve(question);
 
-  if (score < minScore) {
-    return { status: "no_evidence", score };
+  if (score < MIN_TFIDF_SCORE) {
+    return { status: "no_evidence", score, retrieval: "tfidf" };
   }
 
-  const best = chunks[index];
+  const best = rows[index];
   return {
     status: "ok",
     answer: firstSentence(best.text),
     quote: best.text.trim(),
-    source: best.documentName,
+    source: best.document_name,
     score,
+    retrieval: "tfidf",
+  };
+}
+
+export function getRetrievalMeta(): {
+  hfTokenConfigured: boolean;
+  embeddingsDisabled: boolean;
+  sqlitePath: string;
+  embeddingModel: string;
+} {
+  return {
+    hfTokenConfigured: Boolean(getHfToken()),
+    embeddingsDisabled: isEmbeddingsDisabled(),
+    sqlitePath: process.env.DATABASE_PATH ?? "data/policy-compass.db",
+    embeddingModel: getEmbeddingModelId(),
   };
 }

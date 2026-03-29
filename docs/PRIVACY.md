@@ -1,6 +1,6 @@
 # Privacy & data handling (EU-oriented summary)
 
-Policy Compass is a prototype for **citation-backed internal Q&A**. This document describes how data is processed in the default MVP configuration so teams can align with GDPR-style expectations (transparency, data minimisation, purpose limitation).
+Policy Compass is a prototype for **citation-backed internal Q&A**. This document describes how data is processed in the MVP so teams can align with GDPR-style expectations (transparency, data minimisation, purpose limitation).
 
 ## Roles
 
@@ -10,22 +10,27 @@ Policy Compass is a prototype for **citation-backed internal Q&A**. This documen
 ## What we process
 
 - **Uploaded policy text** (Markdown or pasted text) split into passages for search.
-- **Questions** typed by the user, used only to score passages and return a citation.
+- **Questions** typed by the user, used only to retrieve passages and return a citation.
 
 We **do not** require user accounts, email addresses, or personal profiles for the MVP.
 
-## Default retrieval (no third-party AI)
+## Retrieval modes
 
-The baseline implementation uses **TF–IDF retrieval on the server**. Passages and questions are processed in application memory on your infrastructure. No document content is sent to an external inference API unless you explicitly add such an integration later.
+1. **TF–IDF (always available)**  
+   Runs on your server. No document text is sent to a third party.
 
-## Storage
+2. **Embeddings (optional)**  
+   If you set `HF_TOKEN`, passages and questions can be embedded using the open-source model configured via `HF_EMBEDDINGS_MODEL` (default: `sentence-transformers/all-MiniLM-L6-v2`) through the **Hugging Face Inference API**.  
+   Your organisation acts as the controller for that transfer; list Hugging Face as a **subprocessor** in your privacy notice if you enable this. Prefer EU-focused hosting and tokens with minimal scope.
 
-- **In-memory store** for the hackathon MVP: data persists for the lifetime of the Node process and can be cleared in the UI. A restart typically wipes the index.
-- **Do not** use this prototype as a long-term archive for sensitive documents without hardening (encryption at rest, access control, retention policy).
+## Storage (MVP)
+
+- **SQLite** database file (default: `data/policy-compass.db`) stores passages and optional embedding vectors.  
+- For **production** deployments, teams typically move to **PostgreSQL** (see [ROADMAP.md](./ROADMAP.md)) with backups, encryption at rest, and access control.
 
 ## International transfers
 
-If you enable vendors (for example hosted embedding APIs), choose **EU data regions** where offered and list subprocessors in your privacy notice.
+If you enable Hugging Face or other vendors, choose **EU data regions** where offered and document subprocessors clearly.
 
 ## Your responsibilities
 

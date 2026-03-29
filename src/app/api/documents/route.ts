@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const { document } = addDocument(name, text);
+    const { document } = await addDocument(name, text);
     return NextResponse.json({ document });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to index document.";

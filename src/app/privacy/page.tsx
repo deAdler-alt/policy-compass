@@ -21,24 +21,23 @@ export default function PrivacyPage() {
           collect names, emails, or authentication data.
         </li>
         <li>
-          <strong className="text-[var(--foreground)]">Your documents stay on your deployment.</strong>{" "}
-          Text you index is processed in the application memory of your server instance. It is not
-          sent to a third-party model in the default configuration (retrieval uses on-server
-          TF–IDF).
+          <strong className="text-[var(--foreground)]">Local SQLite storage.</strong> Passages (and
+          optional embedding vectors) are stored in a database file on your server. Clear the index
+          from the UI or delete the file according to your policy.
         </li>
         <li>
-          <strong className="text-[var(--foreground)]">Ephemeral by default.</strong> In this MVP,
-          stored passages live in process memory and can be cleared with &quot;Clear all&quot; or
-          lost on restart—suitable for demos, not regulated archives.
+          <strong className="text-[var(--foreground)]">TF–IDF on the server.</strong> Always available
+          without sending text to a third party.
         </li>
         <li>
-          <strong className="text-[var(--foreground)]">Logs.</strong> Avoid logging raw policy text
-          in production. Configure hosting logs according to your organisation&apos;s policy.
+          <strong className="text-[var(--foreground)]">Optional Hugging Face embeddings.</strong> If
+          you set <code className="rounded bg-[var(--accent-soft)] px-1">HF_TOKEN</code>, passages
+          and questions may be sent to the Hugging Face Inference API for open-source sentence
+          embeddings. List Hugging Face as a subprocessor where required.
         </li>
         <li>
-          <strong className="text-[var(--foreground)]">Subprocessors.</strong> If you later enable
-          external APIs (for example embeddings), document them in your DPIA and privacy notice; use
-          EU regions where available.
+          <strong className="text-[var(--foreground)]">Logs.</strong> Avoid logging raw policy text in
+          production. Configure hosting logs according to your organisation&apos;s policy.
         </li>
       </ul>
     </div>

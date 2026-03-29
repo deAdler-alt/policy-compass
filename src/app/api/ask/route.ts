@@ -23,13 +23,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Question is required." }, { status: 400 });
   }
 
-  const result = answerQuestion(question);
+  const result = await answerQuestion(question);
 
   if (result.status === "no_evidence") {
     return NextResponse.json({
       status: "no_evidence",
       message: "No supporting passage found in the uploaded sources.",
       score: result.score,
+      retrieval: result.retrieval,
     });
   }
 
@@ -39,5 +40,6 @@ export async function POST(request: Request) {
     quote: result.quote,
     source: result.source,
     score: result.score,
+    retrieval: result.retrieval,
   });
 }

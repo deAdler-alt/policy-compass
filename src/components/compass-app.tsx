@@ -14,11 +14,21 @@ type AskOk = {
   answer: string;
   quote: string;
   source: string;
+  retrieval?: "embedding" | "tfidf";
 };
 
 type AskNo = {
   status: "no_evidence";
   message: string;
+  retrieval?: "embedding" | "tfidf";
+};
+
+type Meta = {
+  hfTokenConfigured: boolean;
+  embeddingsDisabled: boolean;
+  embeddingModel: string;
+  databasePathHint: string;
+  retrievalHint: string;
 };
 
 export function CompassApp() {
@@ -30,6 +40,7 @@ export function CompassApp() {
   const [seedLoading, setSeedLoading] = useState(false);
   const [result, setResult] = useState<AskOk | AskNo | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [meta, setMeta] = useState<Meta | null>(null);
 
   const refreshDocs = useCallback(async () => {
     const res = await fetch("/api/documents");
@@ -44,6 +55,21 @@ export function CompassApp() {
   useEffect(() => {
     void refreshDocs();
   }, [refreshDocs]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/meta");
+        if (!res.ok) {
+          return;
+        }
+        const data = (await res.json()) as Meta;
+        setMeta(data);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
 
   async function loadSeed() {
     setSeedLoading(true);
@@ -132,6 +158,10 @@ export function CompassApp() {
             typeof data.message === "string"
               ? data.message
               : "No supporting passage found in the uploaded sources.",
+          retrieval:
+            data.retrieval === "embedding" || data.retrieval === "tfidf"
+              ? data.retrieval
+              : undefined,
         });
         return;
       }
@@ -141,6 +171,10 @@ export function CompassApp() {
           answer: String(data.answer ?? ""),
           quote: String(data.quote ?? ""),
           source: String(data.source ?? ""),
+          retrieval:
+            data.retrieval === "embedding" || data.retrieval === "tfidf"
+              ? data.retrieval
+              : undefined,
         });
       }
     } catch {
@@ -168,25 +202,41 @@ export function CompassApp() {
 
   const totalChunks = documents.reduce((acc, d) => acc + d.chunkCount, 0);
 
+  const retrievalBadge =
+    meta &&
+    !meta.embeddingsDisabled &&
+    meta.hfTokenConfigured &&
+    "Embedding retrieval on (HF)";
+
   return (
-    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+    <div className="min-h-screen text-[var(--foreground)]">
       <div className="mx-auto flex max-w-3xl flex-col gap-10 px-4 py-12 sm:px-6 lg:px-8">
-        <header className="space-y-3">
+        <header className="space-y-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--accent)]">
             Enterprise · internal knowledge
           </p>
-          <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Policy Compass</h1>
-          <p className="max-w-2xl text-base leading-relaxed text-[var(--muted)]">
-            Ask questions about policies and procedures. Answers are grounded in{" "}
-            <span className="font-medium text-[var(--foreground)]">verbatim passages</span> from your
-            documents—no guesses when evidence is missing.
-          </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div className="space-y-3">
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Policy Compass</h1>
+              <p className="max-w-2xl text-base leading-relaxed text-[var(--muted)]">
+                Ask questions about policies and procedures. Answers are grounded in{" "}
+                <span className="font-medium text-[var(--foreground)]">verbatim passages</span> from
+                your documents—no guesses when evidence is missing.
+              </p>
+            </div>
+            {retrievalBadge ? (
+              <span className="inline-flex w-fit items-center rounded-full border border-[var(--border)] bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--accent)]">
+                {retrievalBadge}
+              </span>
+            ) : (
+              <span className="inline-flex w-fit items-center rounded-full border border-dashed border-[var(--border)] px-3 py-1 text-xs text-[var(--muted)]">
+                TF–IDF mode · add HF_TOKEN for embeddings
+              </span>
+            )}
+          </div>
         </header>
 
-        <section
-          className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm"
-          aria-labelledby="sources-heading"
-        >
+        <section className="pc-card p-6 sm:p-7" aria-labelledby="sources-heading">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 id="sources-heading" className="text-lg font-semibold">
@@ -234,8 +284,8 @@ export function CompassApp() {
               value={paste}
               onChange={(e) => setPaste(e.target.value)}
               rows={8}
-              placeholder="# Title&#10;&#10;Your internal policy text…"
-              className="w-full rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+              placeholder={"# Title\n\nYour internal policy text…"}
+              className="pc-input w-full rounded-xl px-3 py-2 text-sm"
             />
             <button
               type="button"
@@ -248,7 +298,7 @@ export function CompassApp() {
           </div>
 
           {documents.length > 0 && (
-            <ul className="mt-6 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)]">
+            <ul className="mt-6 divide-y divide-[var(--border)] rounded-xl border border-[var(--border)] bg-[var(--background)]">
               {documents.map((doc) => (
                 <li key={doc.id} className="flex items-center justify-between px-4 py-3 text-sm">
                   <span className="font-medium">{doc.name}</span>
@@ -259,21 +309,18 @@ export function CompassApp() {
           )}
         </section>
 
-        <section
-          className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm"
-          aria-labelledby="ask-heading"
-        >
+        <section className="pc-card p-6 sm:p-7" aria-labelledby="ask-heading">
           <h2 id="ask-heading" className="text-lg font-semibold">
             Ask a question
           </h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
-            Example: “When is the submission deadline?” (works after indexing the sample policy.)
+            Example: “When is the submission deadline?” (after indexing the sample policy.)
           </p>
           <div className="mt-4 flex flex-col gap-3 sm:flex-row">
             <input
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
-              className="flex-1 rounded-full border border-[var(--border)] bg-[var(--background)] px-4 py-2.5 text-sm outline-none ring-[var(--accent)] focus:ring-2"
+              className="pc-input flex-1 rounded-full px-4 py-2.5 text-sm"
               placeholder="Type your question…"
             />
             <button
@@ -293,8 +340,15 @@ export function CompassApp() {
           )}
 
           {result && result.status === "ok" && (
-            <div className="mt-6 space-y-4 rounded-xl bg-[var(--accent-soft)] p-4">
-              <p className="text-sm font-semibold text-[var(--accent)]">Grounded answer</p>
+            <div className="mt-6 space-y-4 rounded-xl border border-[var(--border)] bg-[var(--accent-soft)] p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-[var(--accent)]">Grounded answer</p>
+                {result.retrieval && (
+                  <span className="rounded-full bg-[var(--card)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                    {result.retrieval === "embedding" ? "Embedding retrieval" : "TF–IDF retrieval"}
+                  </span>
+                )}
+              </div>
               <p className="text-base leading-relaxed">{result.answer}</p>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
@@ -315,13 +369,23 @@ export function CompassApp() {
           )}
         </section>
 
-        <footer className="pb-8 text-xs text-[var(--muted)]">
-          Retrieval uses on-server TF‑IDF over your passages; no third-party inference is required.
-          See the{" "}
-          <a className="underline underline-offset-2" href="/privacy">
-            privacy summary
-          </a>{" "}
-          for EU-aligned data practices.
+        <footer className="pb-8 text-xs leading-relaxed text-[var(--muted)]">
+          <p>
+            {meta?.retrievalHint ??
+              "Retrieval: TF–IDF and optional Hugging Face embeddings when HF_TOKEN is set."}
+          </p>
+          <p className="mt-2">
+            SQLite path: <code className="rounded bg-[var(--accent-soft)] px-1">{meta?.databasePathHint ?? "data/policy-compass.db"}</code> · Model:{" "}
+            <code className="rounded bg-[var(--accent-soft)] px-1">{meta?.embeddingModel ?? "—"}</code>
+          </p>
+          <p className="mt-2">
+            See the{" "}
+            <a className="underline underline-offset-2" href="/privacy">
+              privacy summary
+            </a>{" "}
+            and <code className="rounded bg-[var(--accent-soft)] px-1">content/samples/</code> for
+            test Markdown files.
+          </p>
         </footer>
       </div>
     </div>
