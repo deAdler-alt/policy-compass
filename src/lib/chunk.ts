@@ -1,24 +1,41 @@
 const MAX_CHUNK = 520;
 const MIN_CHUNK = 120;
 
+function isLonelyMarkdownHeading(paragraph: string): boolean {
+  const lines = paragraph.split("\n");
+  return (
+    lines.length <= 2 &&
+    /^#{1,6}\s+\S/.test(paragraph.trim()) &&
+    paragraph.length < 220
+  );
+}
+
 /**
- * Merge a short Markdown heading block with the following paragraph so citations
- * include substantive text, not only a heading line.
+ * Merge consecutive heading-only paragraphs with the first following non-heading
+ * paragraph so chunks are not "title + subtitle" without body text.
  */
 function mergeLonelyMarkdownHeadings(paragraphs: string[]): string[] {
   const out: string[] = [];
   let i = 0;
   while (i < paragraphs.length) {
     const p = paragraphs[i];
-    const lines = p.split("\n");
-    const looksLikeHeading =
-      lines.length <= 2 && /^#{1,6}\s+\S/.test(p.trim()) && p.length < 220;
-    if (looksLikeHeading && i + 1 < paragraphs.length) {
-      out.push(`${p}\n\n${paragraphs[i + 1]}`);
-      i += 2;
-    } else {
+    if (!isLonelyMarkdownHeading(p)) {
       out.push(p);
       i += 1;
+      continue;
+    }
+
+    const headingRun: string[] = [];
+    while (i < paragraphs.length && isLonelyMarkdownHeading(paragraphs[i])) {
+      headingRun.push(paragraphs[i]);
+      i += 1;
+    }
+
+    if (i < paragraphs.length) {
+      out.push([...headingRun, paragraphs[i]].join("\n\n"));
+      i += 1;
+    } else {
+      out.push(headingRun.join("\n\n"));
     }
   }
   return out;

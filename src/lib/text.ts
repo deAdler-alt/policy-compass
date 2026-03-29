@@ -42,9 +42,14 @@ export function tokenize(input: string): string[] {
 }
 
 export function firstSentence(text: string): string {
-  const trimmed = text.trim();
-  const withoutHeading = trimmed.replace(/^#{1,6}\s+[^\n]+\n+/, "").trim();
-  const body = withoutHeading.length > 0 ? withoutHeading : trimmed;
+  let body = text.trim();
+  // Drop all leading Markdown heading lines so the "answer" is prose, not `# Title`
+  while (/^#{1,6}\s+[^\n]+/.test(body)) {
+    body = body.replace(/^#{1,6}\s+[^\n]+\n*/, "").trim();
+  }
+  if (!body) {
+    body = text.trim();
+  }
   const match = body.match(/^[^.!?]+[.!?]?/);
   const sentence = match ? match[0].trim() : body;
   return sentence.length > 280 ? `${sentence.slice(0, 277)}…` : sentence;

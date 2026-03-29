@@ -354,7 +354,7 @@ export function CompassApp() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                   Source passage
                 </p>
-                <blockquote className="mt-2 border-l-4 border-[var(--accent)] pl-4 text-sm leading-relaxed text-[var(--foreground)]">
+                <blockquote className="mt-2 whitespace-pre-wrap border-l-4 border-[var(--accent)] pl-4 text-sm leading-relaxed text-[var(--foreground)]">
                   {result.quote}
                 </blockquote>
                 <p className="mt-2 text-xs text-[var(--muted)]">Document: {result.source}</p>

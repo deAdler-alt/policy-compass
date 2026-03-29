@@ -31,7 +31,8 @@ type ChunkRow = {
 };
 
 const MIN_TFIDF_SCORE = 0.06;
-const MIN_COSINE_SCORE = 0.28;
+/** Below this cosine similarity, we fall back to TF–IDF (lexical match). */
+const MIN_COSINE_SCORE = 0.18;
 
 function loadChunkRows(): ChunkRow[] {
   const db = getDb();
